@@ -1,5 +1,0 @@
-streamlit
-nltk
-scikit-learn
-numpy
-rouge-score
