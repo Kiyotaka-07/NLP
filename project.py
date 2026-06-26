@@ -19,6 +19,15 @@ def download_nltk_resources():
 
 download_nltk_resources()
 
+# --- Initialize Session State ---
+# This allows Streamlit to remember data even when the page reruns
+if 'generated_summary' not in st.session_state:
+    st.session_state.generated_summary = None
+if 'summary_metrics' not in st.session_state:
+    st.session_state.summary_metrics = {}
+if 'human_scores' not in st.session_state:
+    st.session_state.human_scores = None
+
 # --- 2. BACKEND LOGIC ---
 def preprocess_text(sentence):
     # Case Folding & Punctuation Removal
@@ -127,6 +136,7 @@ with col_settings:
     
     generate_btn = st.button("Generate Summary", type="primary", use_container_width=True)
 
+# Generate Logic (Updates Session State)
 if generate_btn:
     if not input_text.strip():
         st.warning("Please enter a source document to summarize!")
@@ -134,41 +144,70 @@ if generate_btn:
         with st.spinner("Executing TF-IDF Pipeline..."):
             summary, orig_len, sum_len = generate_summary(input_text, compression_rate=compression)
             
-            st.divider()
-            st.subheader("3. Generated Summary")
-            st.info(summary)
+            # Save results to session state
+            st.session_state.generated_summary = summary
+            st.session_state.summary_metrics = {
+                "orig_len": orig_len,
+                "sum_len": sum_len,
+                "comp_ratio": calculate_compression_ratio(input_text, summary),
+                "rouge": calculate_rouge(summary, reference_text) if reference_text.strip() else None
+            }
+            # Reset human scores for the new summary
+            st.session_state.human_scores = None
+
+# Display Logic (Reads from Session State so it persists across reruns)
+if st.session_state.generated_summary is not None:
+    st.divider()
+    st.subheader("3. Generated Summary")
+    st.info(st.session_state.generated_summary)
+    
+    st.divider()
+    st.subheader("4. Evaluation Metrics")
+    
+    metrics_col1, metrics_col2 = st.columns(2)
+    
+    with metrics_col1:
+        st.markdown("### 📈 Quantitative Assessment")
+        
+        # Compression Ratio
+        metrics = st.session_state.summary_metrics
+        st.metric(label="Compression Ratio (Word Count)", value=f"{metrics['comp_ratio']}%")
+        st.caption(f"Original Sentences: {metrics['orig_len']} | Summary Sentences: {metrics['sum_len']}")
+        
+        # ROUGE Scores
+        if metrics["rouge"]:
+            st.markdown("**ROUGE Scores (F-Measure)**")
+            r1, r2, rl = st.columns(3)
+            r1.metric("ROUGE-1 (Unigram)", metrics["rouge"]["ROUGE-1"])
+            r2.metric("ROUGE-2 (Bigram)", metrics["rouge"]["ROUGE-2"])
+            rl.metric("ROUGE-L (LCS)", metrics["rouge"]["ROUGE-L"])
+        else:
+            st.warning("⚠️ ROUGE scores skipped. Please provide a reference summary above to calculate overlap.")
             
-            st.divider()
-            st.subheader("4. Evaluation Metrics")
-            
-            metrics_col1, metrics_col2 = st.columns(2)
-            
-            with metrics_col1:
-                st.markdown("### 📈 Quantitative Assessment")
-                
-                # Compression Ratio
-                comp_ratio = calculate_compression_ratio(input_text, summary)
-                st.metric(label="Compression Ratio (Word Count)", value=f"{comp_ratio}%")
-                st.caption(f"Original Sentences: {orig_len} | Summary Sentences: {sum_len}")
-                
-                # ROUGE Scores
-                if reference_text.strip():
-                    rouge_results = calculate_rouge(summary, reference_text)
-                    st.markdown("**ROUGE Scores (F-Measure)**")
-                    r1, r2, rl = st.columns(3)
-                    r1.metric("ROUGE-1 (Unigram)", rouge_results["ROUGE-1"])
-                    r2.metric("ROUGE-2 (Bigram)", rouge_results["ROUGE-2"])
-                    rl.metric("ROUGE-L (LCS)", rouge_results["ROUGE-L"])
-                else:
-                    st.warning("⚠️ ROUGE scores skipped. Please provide a reference summary above to calculate overlap.")
-            
-            with metrics_col2:
-                st.markdown("### 🧑‍⚖️ Human Evaluation")
-                st.write("Rate the qualitative aspects of this summary:")
-                
-                rel_score = st.slider("Relevance (Correlates to significant topics)", 1, 5, 3)
-                coh_score = st.slider("Coherence (Transition between sentences)", 1, 5, 3)
-                read_score = st.slider("Readability (Clarity, grammar, flow)", 1, 5, 3)
-                
-                if st.button("Submit Human Evaluation"):
-                    st.success("Evaluation saved! (Note: In a production app, this would save to a database).")
+        # Display Human Scores if they have been submitted
+        if st.session_state.human_scores:
+            st.markdown("---")
+            st.markdown("### 🧑‍⚖️ Human Evaluation Results")
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Relevance", f"{st.session_state.human_scores['relevance']}/5")
+            h2.metric("Coherence", f"{st.session_state.human_scores['coherence']}/5")
+            h3.metric("Readability", f"{st.session_state.human_scores['readability']}/5")
+            st.success("Scores successfully recorded!")
+    
+    with metrics_col2:
+        st.markdown("### 🧑‍⚖️ Human Evaluation")
+        st.write("Rate the qualitative aspects of this summary:")
+        
+        rel_score = st.slider("Relevance (Correlates to significant topics)", 1, 5, 3, key="rel_slider")
+        coh_score = st.slider("Coherence (Transition between sentences)", 1, 5, 3, key="coh_slider")
+        read_score = st.slider("Readability (Clarity, grammar, flow)", 1, 5, 3, key="read_slider")
+        
+        if st.button("Submit Human Evaluation"):
+            # Save the human evaluation scores to session state
+            st.session_state.human_scores = {
+                "relevance": rel_score,
+                "coherence": coh_score,
+                "readability": read_score
+            }
+            # Force a rerun so the scores immediately render in metrics_col1
+            st.rerun()
