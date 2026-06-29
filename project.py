@@ -118,7 +118,7 @@ with col_input:
     )
     
     reference_text = st.text_area(
-        "Paste a Human-Written Reference Summary here (Optional, required for ROUGE scores):",
+        "Paste the Reference Summary here (Optional, required for ROUGE scores):",
         height=100,
         placeholder="Enter a standard summary to compare against the machine-generated one..."
     )
